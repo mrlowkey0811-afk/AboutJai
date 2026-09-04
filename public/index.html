@@ -3,51 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Personal IP Monitor</title>
+    <title>Welcome</title>
     <style>
-        body { font-family: monospace; background: #121212; color: #00ff00; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { border-bottom: 1px solid #00ff00; padding-bottom: 10px; }
-        button { background: #00ff00; color: #121212; border: none; padding: 10px 15px; cursor: pointer; font-weight: bold; font-family: monospace; }
-        button:hover { background: #00cc00; }
-        .log-entry { background: #1e1e1e; border: 1px solid #333; padding: 10px; margin-top: 10px; border-radius: 4px; }
-        .time { color: #888; font-size: 12px; }
+        body { font-family: sans-serif; background: #121212; color: #ffffff; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .box { background: #1e1e1e; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); text-align: center; max-width: 400px; width: 100%; }
+        input { width: 80%; padding: 10px; margin: 15px 0; border: 1px solid #444; background: #2a2a2a; color: white; border-radius: 4px; text-align: center; }
+        button { background: #00ff00; color: black; border: none; padding: 10px 20px; font-weight: bold; border-radius: 4px; cursor: pointer; }
+        #lol-screen { display: none; font-size: 48px; font-weight: bold; color: #ff0055; animation: blink 1s infinite; }
+        .dashboard { text-align: left; background: #000; color: #00ff00; font-family: monospace; padding: 15px; border-radius: 4px; max-height: 400px; overflow-y: auto; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>📡 IP Connection Dashboard</h1>
-        <p>Opening this page automatically tests and logs your current IP connection.</p>
-        <button onclick="refreshLogs()">🔄 Refresh Log History</button>
-        
-        <div id="logs" style="margin-top: 20px;">Loading history...</div>
+
+    <!-- VISITOR BOX: What regular users see -->
+    <div id="visitor-ui" class="box">
+        <h2>Enter your Name / Username to continue:</h2>
+        <input type="text" id="username" placeholder="Username...">
+        <br>
+        <button onclick="submitName()">Submit</button>
+    </div>
+
+    <!-- LOL SCREEN: Shows up after submitting -->
+    <div id="lol-screen">
+        LOL
+    </div>
+
+    <!-- OWNER DASHBOARD: Only shows up if you use the secret URL -->
+    <div id="owner-ui" class="box" style="display: none; max-width: 700px;">
+        <h2>📡 Secret IP Admin Panel</h2>
+        <div id="logs" class="dashboard">Loading logs...</div>
     </div>
 
     <script>
-        // 1. Immediately log our own visit upon opening
-        fetch('/api/log', { method: 'POST' })
-            .then(() => refreshLogs());
+        // Check if the URL has "?secret=mysecret123"
+        const urlParams = new URLSearchParams(window.location.search);
+        const secretKey = urlParams.get('secret');
 
-        // 2. Fetch the history from the serverless function
-        function refreshLogs() {
-            fetch('/api/log')
-                .then(res => res.json())
+        if (secretKey) {
+            // Hide the visitor stuff and show the dashboard
+            document.getElementById('visitor-ui').style.display = 'none';
+            document.getElementById('owner-ui').style.display = 'block';
+            loadAdminLogs(secretKey);
+        }
+
+        // When a regular visitor hits submit
+        function submitName() {
+            const nameInput = document.getElementById('username').value.trim();
+            if(!nameInput) return alert("Please enter a name!");
+
+            // Send the name to our serverless backend
+            fetch('/api/log', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: nameInput })
+            }).then(() => {
+                // Hide input and show LOL screen
+                document.getElementById('visitor-ui').style.display = 'none';
+                document.getElementById('lol-screen').style.display = 'block';
+            }).catch(() => {
+                alert("Something went wrong.");
+            });
+        }
+
+        // Fetch logs using the secure URL parameter
+        function loadAdminLogs(key) {
+            fetch(`/api/log?secret=${key}`)
+                .then(res => {
+                    if (!res.ok) throw new Error("Unauthorized");
+                    return res.json();
+                })
                 .then(data => {
                     const logsDiv = document.getElementById('logs');
                     if (!data.logs || data.logs.length === 0) {
-                        logsDiv.innerHTML = "<p>No visitor logs recorded yet.</p>";
+                        logsDiv.innerHTML = "No logs recorded yet.";
                         return;
                     }
                     logsDiv.innerHTML = data.logs.map(log => `
-                        <div class="log-entry">
-                            <strong>IP Address:</strong> ${log.ip} <br>
-                            <span class="time">🕒 ${new Date(log.time).toLocaleString()}</span><br>
-                            <small style="color: #aaa;">Browser: ${log.userAgent}</small>
-                        </div>
+                        [${new Date(log.time).toLocaleTimeString()}]<br>
+                        👤 User: ${log.username}<br>
+                        🌐 IP Address: ${log.ip}<br>
+                        -----------------------------------<br>
                     `).join('');
                 })
                 .catch(err => {
-                    document.getElementById('logs').innerText = "Error loading logs.";
+                    document.getElementById('logs').innerHTML = "<span style='color:red;'>Error: Invalid Secret Access Key.</span>";
                 });
         }
     </script>
